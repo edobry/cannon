@@ -3,7 +3,7 @@
 
 int MASTER = 0;
 
-typedef enum { LEFT, RIGHT, TOP, BOTTOM } Neighbor;
+typedef enum { LEFT, RIGHT, ABOVE, BELOW } Neighbor;
 
 typedef struct Position {
     int x;
@@ -15,7 +15,7 @@ typedef struct Position {
 Position neighbor(Position pos, int N, Neighbor direction) {
     //determine direction
     int delta = 1;
-    if(direction == LEFT || direction == TOP)
+    if(direction == LEFT || direction == ABOVE)
         delta = -1;
 
     int newX = pos.x;
@@ -41,18 +41,38 @@ Position neighbor(Position pos, int N, Neighbor direction) {
     if(newY > N)
         newY -= N;
 
-    return { .x = newX, .y = newY };
+    return (Position) { .x = newX, .y = newY };
 }
 
 //retrieves the processor ID for a certain position
-int valueAtPos(Position currpos, int* grid[3][3]) {
-    return grid[currpos.x][currpos.y];
+int valueAtPos(Position currPos, int grid[3][3]) {
+    return grid[currPos.x][currPos.y];
+}
+
+void buildProcessorGrid(int N, int grid[3][3]) {
+    int currId = 0;
+    for(int x = 0; x < N; x++) {
+        for(int y = 0; y < N; y++) {
+            grid[x][y] = currId++;
+        }
+    }
+}
+
+Position findProcessor(int id, int N, int grid[3][3]) {
+    for(int x = 0; x < N; x++) {
+        for(int y = 0; y < N; y++) {
+            Position currPos = { .x = x, .y = y };
+
+            if(valueAtPos(currPos, grid) == id)
+                return currPos;
+        }
+    }
+
+    return (Position) { .x = -1, .y = -1 };
 }
 
 //sets up the matricies, processor grid, and sends starting data to processors
-void initMaster() {
-    int N = 3;
-
+void initMaster(int N, int processorIds[3][3]) {
     int matrixA[3][3] = {
         {3, 5, 2},
         {7, 3, 6},
@@ -73,28 +93,16 @@ void initMaster() {
 
 
     //figure out all the processor IDs and put them in this nice grid
-    int processorIds[3][3] = buildProcessorGrid(N, MPI_COMM_WORLD);
 
 
     //then, right before you send out the initial matrix elements,
     //send to each node the neighboring processor IDs
+
+    //wait no don't need to send, can just construct. much simpler.
     for(int i = 0; i < N; i ++) {
         for(int j = 0; j < N; j++) {
             Position currProcessor = { .x = i, .y = j };
             int currProcessorId = valueAtPos(currProcessor, processorIds);
-
-            //oh wait actually we need to tell the nodes where they're
-            //recieving values from too, right... so thats 4 now, lets use an
-            //array, order will be [left right top bottom]
-            int neighbors[4] = {
-                valueAtPos(neighbor(currProcessor, N, LEFT), processorIds),
-                valueAtPos(neighbor(currProcessor, N, RIGHT), processorIds),
-                valueAtPos(neighbor(currProcessor, N, TOP), processorIds),
-                valueAtPos(neighbor(currProcessor, N, BOTTOM), processorIds)
-            };
-
-            //send the neighbors
-            MPI_Send(&neighbors, 4, MPI_INT, currProcessorId, 2, MPI_COMM_WORLD);
 
             //send the initial matrix elements
             int elements[2] = {
@@ -106,13 +114,19 @@ void initMaster() {
     }
 }
 
-int calculate(int N) {
-    int neighbors[4];
-    MPI_Recv(&neighbors, 4, MPI_INT, MASTER, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+int calculate(int N, int ownId, int processorIds[3][3]) {
+    Position ownPosition = findProcessor(ownId, N, processorIds);
+
+    int neighbors[4] = {
+        valueAtPos(neighbor(ownPosition, N, LEFT), processorIds),
+        valueAtPos(neighbor(ownPosition, N, RIGHT), processorIds),
+        valueAtPos(neighbor(ownPosition, N, ABOVE), processorIds),
+        valueAtPos(neighbor(ownPosition, N, BELOW), processorIds)
+    };
 
     //ALIGNMENT PHASE
-    for()
-    //wait, how do i figure out my own id...
+
+    //for each position, send the 
 
 
     //MAIN PHASE
@@ -122,7 +136,7 @@ int calculate(int N) {
         MPI_Recv(&elementA, 1, MPI_INT, neighbors[RIGHT], 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(&elementB, 1, MPI_INT, neighbors[BELOW], 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        total += currentElements[0] * currentElements[1];
+        // total += currentElements[0] * currentElements[1];
 
         MPI_Send(&elementA, 1, MPI_INT, neighbors[LEFT], 2, MPI_COMM_WORLD);
         MPI_Send(&elementB, 1, MPI_INT, neighbors[ABOVE], 2, MPI_COMM_WORLD);
@@ -134,18 +148,22 @@ int calculate(int N) {
 int main (int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
-    int mypid, nprocs;
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &mypid);
-    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+    int ownID, numProcessors;
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &ownID);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcessors);
 
     int N = 3;
 
+    int processorIds[3][3];
+    buildProcessorGrid(N, processorIds);
+
     int result;
-    if(mypid == MASTER)
-        initMaster(N);
+    if(ownID == MASTER)
+        initMaster(N,processorIds);
     else
-        result = calculate(N);
+        result = calculate(N, ownId, processorIds);
 
     /* shit out some results */
 
