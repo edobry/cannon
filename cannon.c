@@ -2,6 +2,7 @@
 #include <mpi.h>
 
 int MASTER = 0;
+int DEBUG = 0;
 
 typedef enum { LEFT, RIGHT, ABOVE, BELOW } Neighbor;
 
@@ -31,7 +32,7 @@ Position neighbor(Position pos, int N, Neighbor direction, int delta) {
     else
         newY += delta;
 
-    //normalize
+    ////normalize
 
     //if past left or top
     if(newX < 0)
@@ -53,6 +54,9 @@ int valueAtPos(Position pos, int grid[3][3]) {
     return grid[pos.y][pos.x];
 }
 
+//constructs the processor grid,
+//from top to bottom, left to right
+//starts at 1 to skip the master node
 void buildProcessorGrid(int N, int grid[3][3]) {
     int currId = 1;
     for(int y = 0; y < N; y++) {
@@ -88,6 +92,8 @@ void LOG(char* message, int ownId) {
     printf("Processor %d: %s\n", ownId, message);
 }
 
+//aligns matricies initially, determines
+//where each value should go in the grid
 void initAlign(MatrixElement initialValues[3][3], int matrixA[3][3], int matrixB[3][3], int N) {
     for(int y = 0; y < N; y++) {
         for(int x = 0; x < N; x++) {
@@ -102,19 +108,22 @@ void initAlign(MatrixElement initialValues[3][3], int matrixA[3][3], int matrixB
     }
 }
 
+//awaits results from each node
 void gather(int result[3][3], int N, int numProcessors, int processorGrid[3][3]) {
     for(int i = 0; i < numProcessors; i++) {
         //[0] is result, [1] is source
         int resultMessage[2];
 
-        LOG("Waiting for result...", MASTER);
+        if(DEBUG)
+            LOG("Waiting for result...", MASTER);
         MPI_Recv(&resultMessage, 2, MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         //figure out which position the sender is in
         Position receivedFrom = findProcessor(resultMessage[1], N, processorGrid);
 
-        printf("Processor %d: Got a result from #%d at (%d, %d)\n",
-            MASTER, resultMessage[1], receivedFrom.x, receivedFrom.y);
+        if(DEBUG)
+            printf("Processor %d: Got a result from #%d at (%d, %d)\n",
+                MASTER, resultMessage[1], receivedFrom.x, receivedFrom.y);
 
         //assign the result to the appropriate position
         result[receivedFrom.y][receivedFrom.x] = resultMessage[0];
@@ -137,53 +146,43 @@ void initMaster(int N, int processorIds[3][3]) {
     printGrid(processorIds, N);
 
     LOG("Setting up matricies...", MASTER);
-
     int matrixA[3][3] = {
         {3, 5, 2},
         {7, 3, 6},
         {1, 4, 5}
     };
+    LOG("Matrix A", MASTER);
+    printGrid(matrixA, N);
 
     int matrixB[3][3] = {
         {2, 3, 7},
         {4, 9, 3},
         {7, 3, 4}
     };
-
-    LOG("Matrix A", MASTER);
-    printGrid(matrixA, N);
     LOG("Matrix B", MASTER);
     printGrid(matrixB, N);
 
-    //ok so first master node does the initial allocation
-    //wait no dammit we can't do that, what if the dataset is huge
-
-    //ok, so, master just sends initial values at each position to processors
-    //and then they're responsible for the initial alignment phase
-
-    //FUCK IT
-
     LOG("Aligning matricies...", MASTER);
-
     MatrixElement initialValues[3][3];
     initAlign(initialValues, matrixA, matrixB, N);
 
-    //then, right before you send out the initial matrix elements,
-    //send to each node the neighboring processor IDs
-
-    //wait no don't need to send, can just construct. much simpler.
+    //send initial elements using aligned grid
+    LOG("Scattering...", MASTER);
     for(int y = 0; y < N; y++) {
         for(int x = 0; x < N; x++) {
-            Position currProcessor = { .x = x, .y = y };
-            int currProcessorId = valueAtPos(currProcessor, processorIds);
+            Position currPosition = { .x = x, .y = y };
+            int currProcessor = valueAtPos(currPosition, processorIds);
 
-            MatrixElement value = initialValues[currProcessor.y][currProcessor.x];
+            MatrixElement value = initialValues[currPosition.y][currPosition.x];
 
+            //find appropriate elements for this position
             int elementA = valueAtPos(value.a, matrixA);
             int elementB = valueAtPos(value.b, matrixB);
-            printf("Processor %d: Sending initial elements [%d, %d] to #%d at (%d, %d)\n",
-                MASTER, elementA, elementB, currProcessorId, x, y);
-            sendElements(elementA, elementB, currProcessorId, currProcessorId);
+
+            if(DEBUG)
+                printf("Processor %d: Sending initial elements [%d, %d] to #%d at (%d, %d)\n",
+                    MASTER, elementA, elementB, currProcessor, x, y);
+            sendElements(elementA, elementB, currProcessor, currProcessor);
         }
     }
     LOG("Gathering...", MASTER);
@@ -191,18 +190,25 @@ void initMaster(int N, int processorIds[3][3]) {
     int result[3][3];
     gather(result, N, N*N, processorIds);
 
-    LOG("Result", MASTER);
+    LOG("Cannon done! Original Matricies:", MASTER);
+    printGrid(matrixA, N);
+    printf("\n");
+    printGrid(matrixB, N);
+
+    LOG("Result:", MASTER);
     printGrid(result, N);
 }
 
 int calculate(int N, int ownId, int processorIds[3][3]) {
-    LOG("Determining neighbors...", ownId);
-    printGrid(processorIds, N);
+    if(DEBUG) {
+        LOG("Determining neighbors...", ownId);
+        printGrid(processorIds, N);
+    }
 
     Position ownPosition = findProcessor(ownId, N, processorIds);
-    printf("Processor %d: Position (%d, %d)\n",
-        ownId, ownPosition.x, ownPosition.y);
-
+    if(DEBUG)
+        printf("Processor %d: Position (%d, %d)\n",
+            ownId, ownPosition.x, ownPosition.y);
 
     int neighbors[4] = {
         valueAtPos(neighbor(ownPosition, N, LEFT, 1), processorIds),
@@ -211,15 +217,17 @@ int calculate(int N, int ownId, int processorIds[3][3]) {
         valueAtPos(neighbor(ownPosition, N, BELOW, 1), processorIds)
     };
 
-    LOG("Neighbors", ownId);
-    printf("Processor %d: LEFT: %d\n",
+    if(DEBUG) {
+        LOG("Neighbors", ownId);
+        printf("Processor %d: LEFT: %d\n",
         ownId, neighbors[LEFT]);
-    printf("Processor %d: RIGHT: %d\n",
+        printf("Processor %d: RIGHT: %d\n",
         ownId, neighbors[RIGHT]);
-    printf("Processor %d: ABOVE: %d\n",
+        printf("Processor %d: ABOVE: %d\n",
         ownId, neighbors[ABOVE]);
-    printf("Processor %d: BELOW: %d\n",
+        printf("Processor %d: BELOW: %d\n",
         ownId, neighbors[BELOW]);
+    }
 
     //MAIN PHASE
     int elementA, elementB;
@@ -243,8 +251,9 @@ int calculate(int N, int ownId, int processorIds[3][3]) {
             break;
 
         LOG("Sending elements onward...", ownId);
-        printf("Processor %d: A: #%d B: #%d\n",
-            ownId, neighbors[LEFT], neighbors[ABOVE]);
+        if(DEBUG)
+            printf("Processor %d: A: #%d B: #%d\n",
+                ownId, neighbors[LEFT], neighbors[ABOVE]);
 
         sendElements(elementA, elementB, neighbors[LEFT], neighbors[ABOVE]);
 
@@ -283,8 +292,8 @@ void cannon(int argc, char **argv) {
     }
     else {
         int result = calculate(N, ownId, processorIds);
-        //shit out some results
-        printf("Processor %d: Got result: %d\n", ownId, result);
+        if(DEBUG)
+            printf("Processor %d: Got result: %d\n", ownId, result);
     }
 
     MPI_Finalize();
