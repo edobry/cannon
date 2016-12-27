@@ -55,16 +55,16 @@ int valueAtPos(Position pos, int grid[3][3]) {
 
 void buildProcessorGrid(int N, int grid[3][3]) {
     int currId = 1;
-    for(int x = 0; x < N; x++) {
-        for(int y = 0; y < N; y++) {
+    for(int y = 0; y < N; y++) {
+        for(int x = 0; x < N; x++) {
             grid[y][x] = currId++;
         }
     }
 }
 
 Position findProcessor(int id, int N, int grid[3][3]) {
-    for(int x = 0; x < N; x++) {
-        for(int y = 0; y < N; y++) {
+    for(int y = 0; y < N; y++) {
+        for(int x = 0; x < N; x++) {
             Position currPos = { .x = x, .y = y };
 
             if(valueAtPos(currPos, grid) == id)
@@ -76,8 +76,8 @@ Position findProcessor(int id, int N, int grid[3][3]) {
 }
 
 void printGrid(int grid[3][3], int N) {
-    for(int x = 0; x < N; x++) {
-        for(int y = 0; y < N; y++) {
+    for(int y = 0; y < N; y++) {
+        for(int x = 0; x < N; x++) {
             printf("%d ", grid[y][x]);
         }
         printf("\n");
@@ -89,8 +89,8 @@ void LOG(char* message, int ownId) {
 }
 
 void initAlign(MatrixElement initialValues[3][3], int matrixA[3][3], int matrixB[3][3], int N) {
-    for(int x = 0; x < N; x++) {
-        for(int y = 0; y < N; y++) {
+    for(int y = 0; y < N; y++) {
+        for(int x = 0; x < N; x++) {
             Position currPos = { .x = x, .y = y };
 
             MatrixElement initialValue = {
@@ -172,8 +172,8 @@ void initMaster(int N, int processorIds[3][3]) {
     //send to each node the neighboring processor IDs
 
     //wait no don't need to send, can just construct. much simpler.
-    for(int x = 0; x < N; x++) {
-        for(int y = 0; y < N; y++) {
+    for(int y = 0; y < N; y++) {
+        for(int x = 0; x < N; x++) {
             Position currProcessor = { .x = x, .y = y };
             int currProcessorId = valueAtPos(currProcessor, processorIds);
 
